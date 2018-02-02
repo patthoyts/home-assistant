@@ -3,6 +3,8 @@ import asyncio
 import os
 import uuid
 
+import voluptuous as vol
+
 from .core import callback
 from .exceptions import HomeAssistantError
 from .setup import async_setup_component
@@ -73,6 +75,10 @@ class UnknownHandler(ConfigError):
     """Unknown handler specified."""
 
 
+class UnknownFlow(ConfigError):
+    """Uknown flow specified."""
+
+
 class UnknownStep(ConfigError):
     """Unknown step specified."""
 
@@ -103,41 +109,63 @@ class ConfigManager:
         """Return all entries for a specific domain."""
         return [entry for entry in self.entries if entry.domain == domain]
 
-    def async_configure(self, domain, flow_id=None, step_id='init',
-                        user_input=None):
-        """Start or continue a configuration flow."""
+    @asyncio.coroutine
+    def async_init_flow(self, domain):
+        """Start a configuration flow."""
         handler = HANDLERS.get(domain)
 
         if handler is None:
             # TODO: see if we can load component (and install requirements)
             raise UnknownHandler
 
-        flow = None
+        flow_id = uuid.uuid4().hex
+        flow = self.progress[flow_id] = handler()
+        flow.hass = self.hass
+        flow.domain = domain
+        flow.flow_id = flow_id
 
-        if flow_id is not None:
-            flow = self.progress.get(flow_id)
+        return (yield from self._async_handle_step(flow, 'init', None))
+
+    @asyncio.coroutine
+    def async_configure(self, flow_id, user_input=None):
+        """Start or continue a configuration flow."""
+        flow = self.progress.get(flow_id)
 
         if flow is None:
-            flow_id = uuid.uuid4().hex
-            flow = self.progress[flow_id] = handler()
-            flow.hass = self.hass
-            flow.domain = domain
-            flow.flow_id = flow_id
+            raise UnknownFlow
 
+        step_id, data_schema = flow.cur_step
+
+        if data_schema is None:
+            data_schema = vol.Schema(None)
+
+        user_input = data_schema(user_input)
+
+        return (yield from self._async_handle_step(flow, step_id, user_input))
+
+    @asyncio.coroutine
+    def _async_handle_step(self, flow, step_id, user_input):
+        """Handle a step of a flow."""
         method = "async_step_{}".format(step_id)
 
         if not hasattr(flow, method):
-            self.progress.pop(flow_id)
+            self.progress.pop(flow.flow_id)
             raise UnknownStep("Handler {} doesn't support step {}".format(
-                domain, step_id))
+                flow.__class__.__name__, step_id))
 
         result = yield from getattr(flow, method)(user_input)
 
+        if result['type'] not in (RESULT_TYPE_FORM, RESULT_TYPE_CREATE_ENTRY,
+                                  RESULT_TYPE_ABORT):
+            raise ValueError(
+                'Handler returned incorrect type: {}'.format(result['type']))
+
         if result['type'] == RESULT_TYPE_FORM:
+            flow.cur_step = (result.pop('step_id'), result['data_schema'])
             return result
 
-        # Abort and Success results finish the flow
-        self.progress.pop(flow_id)
+        # Abort and Success results both finish the flow
+        self.progress.pop(flow.flow_id)
 
         if result['type'] == RESULT_TYPE_ABORT:
             return result
@@ -145,7 +173,7 @@ class ConfigManager:
         entry = ConfigEntry(
             config_id=flow.flow_id,
             version=flow.version,
-            domain=domain,
+            domain=flow.domain,
             title=result['title'],
             data=result.pop('data'),
             source=flow.source
@@ -153,9 +181,9 @@ class ConfigManager:
         self.entries.append(entry)
 
         # Setup entry
-        if domain in self.hass.config.components:
+        if flow.domain in self.hass.config.components:
             # Component already set up, just need to call setup_entry
-            component = getattr(self.hass.components, domain)
+            component = getattr(self.hass.components, flow.domain)
             self.hass.async_add_job(
                 component.async_setup_entry, self.hass, entry)
         else:
@@ -163,7 +191,7 @@ class ConfigManager:
             # We don't have to pass in the real config. The component would
             # have been setup already if it contained config for it.
             self.hass.async_add_job(
-                async_setup_component, self.hass, domain, {})
+                async_setup_component, self.hass, flow.domain, {})
 
         self.async_schedule_save()
         return result
@@ -205,6 +233,7 @@ class ConfigFlowHandler:
     flow_id = None
     hass = None
     source = SOURCE_USER
+    cur_step = None
 
     # Set by dev
     version = 0

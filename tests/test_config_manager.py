@@ -56,7 +56,7 @@ def test_create_entry_calls_setup_entry(hass, manager):
                 })
 
     with patch.dict(config_manager.HANDLERS, {'comp': TestFlow}):
-        yield from manager.async_configure('comp')
+        yield from manager.async_init_flow('comp')
         yield from hass.async_block_till_done()
 
     assert len(mock_setup_entry.mock_calls) == 1
@@ -78,15 +78,14 @@ def test_configure_reuses_handler_instance(manager):
         def async_step_init(self, user_input=None):
             self.handle_count += 1
             return self.async_show_form(
-                title='title',
-                step_id=str(self.handle_count))
+                title=str(self.handle_count),
+                step_id='init')
 
-    with patch('homeassistant.config_manager.HANDLERS.get',
-               return_value=TestFlow):
-        form = yield from manager.async_configure('test')
-        assert form['step_id'] == '1'
-        form = yield from manager.async_configure('test', form['flow_id'])
-        assert form['step_id'] == '2'
+    with patch.dict(config_manager.HANDLERS, {'test': TestFlow}):
+        form = yield from manager.async_init_flow('test')
+        assert form['title'] == '1'
+        form = yield from manager.async_configure(form['flow_id'])
+        assert form['title'] == '2'
         assert len(manager.progress) == 1
         assert len(manager.entries) == 0
 
@@ -102,7 +101,8 @@ def test_configure_two_steps(manager):
                 return self.async_step_second()
             return self.async_show_form(
                 title='title',
-                step_id='init'
+                step_id='init',
+                data_schema=vol.Schema([str])
             )
 
         @asyncio.coroutine
@@ -114,16 +114,16 @@ def test_configure_two_steps(manager):
                 )
             return self.async_show_form(
                 title='title',
-                step_id='second'
+                step_id='second',
+                data_schema=vol.Schema([str])
             )
 
-    with patch('homeassistant.config_manager.HANDLERS.get',
-               return_value=TestFlow):
-        form = yield from manager.async_configure('test')
+    with patch.dict(config_manager.HANDLERS, {'test': TestFlow}):
+        form = yield from manager.async_init_flow('test')
         form = yield from manager.async_configure(
-            'test', form['flow_id'], form['step_id'], ['INIT-DATA'])
+            form['flow_id'], ['INIT-DATA'])
         form = yield from manager.async_configure(
-            'test', form['flow_id'], form['step_id'], ['SECOND-DATA'])
+            form['flow_id'], ['SECOND-DATA'])
         assert form['type'] == config_manager.RESULT_TYPE_CREATE_ENTRY
         assert len(manager.progress) == 0
         assert len(manager.entries) == 1
@@ -153,12 +153,10 @@ def test_show_form(manager):
                 }
             )
 
-    with patch('homeassistant.config_manager.HANDLERS.get',
-               return_value=TestFlow):
-        form = yield from manager.async_configure('test')
+    with patch.dict(config_manager.HANDLERS, {'test': TestFlow}):
+        form = yield from manager.async_init_flow('test')
         assert form['type'] == 'form'
         assert form['title'] == 'Hello form'
-        assert form['step_id'] == 'init'
         assert form['description'] == 'test-description'
         assert form['data_schema'] is schema
         assert form['errors'] == {
@@ -178,11 +176,12 @@ def test_abort_removes_instance(manager):
             self.is_new = False
             return self.async_abort(reason=str(old))
 
-    with patch('homeassistant.config_manager.HANDLERS.get',
-               return_value=TestFlow):
-        form = yield from manager.async_configure('test')
+    with patch.dict(config_manager.HANDLERS, {'test': TestFlow}):
+        form = yield from manager.async_init_flow('test')
         assert form['reason'] == 'True'
-        form = yield from manager.async_configure('test', form['flow_id'])
+        assert len(manager.progress) == 0
+        assert len(manager.entries) == 0
+        form = yield from manager.async_init_flow('test')
         assert form['reason'] == 'True'
         assert len(manager.progress) == 0
         assert len(manager.entries) == 0
@@ -201,9 +200,8 @@ def test_create_saves_data(manager):
                 data='Test Data'
             )
 
-    with patch('homeassistant.config_manager.HANDLERS.get',
-               return_value=TestFlow):
-        yield from manager.async_configure('test')
+    with patch.dict(config_manager.HANDLERS, {'test': TestFlow}):
+        yield from manager.async_init_flow('test')
         assert len(manager.progress) == 0
         assert len(manager.entries) == 1
 
@@ -254,9 +252,8 @@ def test_saving_and_loading(hass):
                 }
             )
 
-    with patch('homeassistant.config_manager.HANDLERS.get',
-               return_value=TestFlow):
-        yield from hass.config_manager.async_configure('test')
+    with patch.dict(config_manager.HANDLERS, {'test': TestFlow}):
+        yield from hass.config_manager.async_init_flow('test')
 
     class Test2Flow(config_manager.ConfigFlowHandler):
         version = 3
@@ -275,7 +272,7 @@ def test_saving_and_loading(hass):
     with patch('homeassistant.config_manager.HANDLERS.get',
                return_value=Test2Flow), \
             patch.object(config_manager, 'SAVE_DELAY', 0):
-        yield from hass.config_manager.async_configure('test')
+        yield from hass.config_manager.async_init_flow('test')
 
     with patch(json_path, mock_open(), create=True) as mock_write:
         # To trigger the call_later
