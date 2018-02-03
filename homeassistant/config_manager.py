@@ -136,10 +136,8 @@ class ConfigManager:
 
         step_id, data_schema = flow.cur_step
 
-        if data_schema is None:
-            data_schema = vol.Schema(None)
-
-        user_input = data_schema(user_input)
+        if data_schema is not None and user_input is not None:
+            user_input = data_schema(user_input)
 
         return (yield from self._async_handle_step(flow, step_id, user_input))
 

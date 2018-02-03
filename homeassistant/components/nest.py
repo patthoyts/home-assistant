@@ -4,11 +4,13 @@ Support for Nest devices.
 For more details about this component, please refer to the documentation at
 https://home-assistant.io/components/nest/
 """
+import asyncio
 import logging
 import socket
 
 import voluptuous as vol
 
+from homeassistant import config_manager
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import discovery
 from homeassistant.const import (
@@ -41,7 +43,7 @@ AWAY_SCHEMA = vol.Schema({
 })
 
 CONFIG_SCHEMA = vol.Schema({
-    DOMAIN: vol.Schema({
+    vol.Optional(DOMAIN): vol.Schema({
         vol.Required(CONF_CLIENT_ID): cv.string,
         vol.Required(CONF_CLIENT_SECRET): cv.string,
         vol.Optional(CONF_STRUCTURE): vol.All(cv.ensure_list, cv.string),
@@ -120,6 +122,11 @@ def setup(hass, config):
 
     if 'nest' in _CONFIGURING:
         return
+
+    # Happens if we get set up for config entry.
+    # TODO clean this up.
+    if DOMAIN not in config:
+        return True
 
     conf = config[DOMAIN]
     client_id = conf[CONF_CLIENT_ID]
@@ -209,3 +216,77 @@ class NestDevice(object):
         except socket.error:
             _LOGGER.error(
                 "Connection error logging into the nest web service.")
+
+
+@config_manager.HANDLERS.register(DOMAIN)
+class NestConfigFlow(config_manager.ConfigFlowHandler):
+    """Handle a configuration flow for Nest."""
+
+    version = 1
+
+
+@config_manager.HANDLERS.register(DOMAIN)
+class NestConfig(config_manager.ConfigFlowHandler):
+    # Future versions of config might require a migration
+    VERSION = 1
+
+    def __init__(self):
+        # Data from step 0 that we'll store.
+        self.client_data = None
+
+    @asyncio.coroutine
+    def async_step_init(self, user_input=None):
+        """Start config flow."""
+        if user_input is not None:
+            self.client_data = user_input
+            return (yield from self.async_step_authorize())
+
+        return self.async_show_form(
+            step_id='init',
+            title='Client information',
+            description='Some Markdown introduction',
+            data_schema=vol.Schema({
+                # Translation keys are:
+                #   components.<comp name>.create_config.<step>.<key name>.caption
+                #   components.<comp name>.create_config.<step>.<key name>.description
+                # In this case: components.nest.create_config.0.client_id.caption
+                vol.Required('client_id'): str,
+                vol.Required('client_secret'): str,
+            })
+        )
+
+    async def async_step_authorize(self, user_input=None):
+        """Ask user to authorize."""
+        if user_input is not None:
+            # import nest
+            # # Validate auth code and get access token
+            # token_info = await nest.async_get_credentials(
+            #     self.client_data['client_id'],
+            #     self.client_data['client_secret'],
+            #     user_input['auth_code'])
+            # user = await nest.async_get_user(token_info['access_token'])
+            return self.async_create_entry(
+                title='Paulus Home',
+                data={
+                    'client_id': self.client_data['client_id'],
+                    'client_secret': self.client_data['client_secret'],
+                    'access_token': 'SOME ACCESS TOKEN',
+                    'refresh_token': 'SOME REFRESH TOKEN'
+                }
+            )
+
+        return self.async_show_form(
+            step_id='authorize',
+            title='Authorize account',
+            description='''Next step is to authorize your account. Click the following link and put the auth code below.
+
+[Authorize account](http://google.com)''',
+            data_schema=vol.Schema({
+                vol.Required('auth_code'): str
+            })
+        )
+
+
+@asyncio.coroutine
+def async_setup_entry(hass, entry):
+    pass

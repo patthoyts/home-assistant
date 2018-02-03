@@ -289,7 +289,7 @@ class HueConfigFlow(config_manager.ConfigFlowHandler):
 
         # If 1 host, select it.
         elif len(hosts) == 1:
-            self.host = hosts[0]
+            self.host = hosts[0]['internalipaddress']
             return (yield from self.async_step_button())
 
         return self.async_show_form(
@@ -337,3 +337,9 @@ class HueConfigFlow(config_manager.ConfigFlowHandler):
             description=CONFIG_INSTRUCTIONS,
             errors=errors
         )
+
+
+@asyncio.coroutine
+def async_setup_entry(hass, entry):
+    hass.async_add_job(
+        setup_bridge, entry.data['host'], hass, entry.data['filename'])

@@ -9,7 +9,7 @@ from homeassistant.components.http import (
 
 
 # TEMP, to register Hue handler
-from homeassistant.components import hue
+from homeassistant.components import hue, nest
 
 
 # Will upload to PyPi when closer to merging.
@@ -45,7 +45,7 @@ class ConfigManagerCreateView(HomeAssistantView):
 
     @asyncio.coroutine
     @RequestDataValidator(vol.Schema({
-        vol.Optional('domain'): str,
+        vol.Required('domain'): str,
     }))
     def post(self, request, data):
         """Handle a POST request."""
@@ -71,6 +71,21 @@ class ConfigManagerProgressView(HomeAssistantView):
     name = 'api:config:config_manager:flow:progress'
 
     @asyncio.coroutine
+    def get(self, request, flow_id):
+        """Get the current state of a flow."""
+        hass = request.app['hass']
+
+        try:
+            result = yield from hass.config_manager.async_configure(flow_id)
+        except config_manager.UnknownFlow:
+            return self.json_message('Invalid flow specified', 404)
+
+        _prepare_json(result)
+
+        return self.json(result)
+
+
+    @asyncio.coroutine
     @RequestDataValidator(vol.Schema(dict), allow_empty=True)
     def post(self, request, flow_id, data):
         """Handle a POST request."""
@@ -81,8 +96,6 @@ class ConfigManagerProgressView(HomeAssistantView):
                 flow_id, data)
         except config_manager.UnknownFlow:
             return self.json_message('Invalid flow specified', 404)
-        except config_manager.UnknownStep:
-            return self.json_message('Invalid step specified', 400)
         except vol.Invalid:
             return self.json_message('User input malformed', 400)
 
