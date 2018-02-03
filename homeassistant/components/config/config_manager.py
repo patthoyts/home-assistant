@@ -8,6 +8,10 @@ from homeassistant.components.http import (
     HomeAssistantView, RequestDataValidator)
 
 
+# TEMP, to register Hue handler
+from homeassistant.components import hue
+
+
 # Will upload to PyPi when closer to merging.
 REQUIREMENTS = ['https://github.com/balloob/voluptuous-json/archive/master.zip'
                 '#voluptuous_json==0.1']

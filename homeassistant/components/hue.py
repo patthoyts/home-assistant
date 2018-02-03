@@ -308,6 +308,7 @@ class HueConfigFlow(config_manager.ConfigFlowHandler):
             import phue
             bridge_id = self.hosts[self.host]
             # TODO Phue is silly in that it REQUIRES a file on disk. Switch to a temp file
+            # Or write a small asyncio lib that does the registration??
             filename = PATH_CONF_FORMAT.format(bridge_id)
 
             try:
@@ -326,9 +327,9 @@ class HueConfigFlow(config_manager.ConfigFlowHandler):
             except ConnectionRefusedError:
                 # TODO all components that have a config flow have a JSON file that lokalise understands
                 # hue/translations.json
-                errors['base'] = 'unable_connect'
+                errors['base'] = 'unable_connect'  # Should we use generic error for this?
             except phue.PhueRegistrationException:
-                errors['base'] = 'press_button_again'
+                errors['base'] = 'press_button_again'  # hue specific error
 
         return self.async_show_form(
             title='Register the bridge',
